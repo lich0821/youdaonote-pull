@@ -10,10 +10,13 @@ import sys
 import time
 import traceback
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from enum import Enum
 from typing import Tuple
 
+import frontmatter
 import requests
+import yaml
 from win32_setctime import setctime
 
 from core import log
@@ -34,6 +37,7 @@ class FileType(Enum):
     MARKDOWN = 1
     XML = 2
     JSON = 3
+    HTML = 4
 
 
 class FileActionEnum(Enum):
@@ -164,12 +168,15 @@ class YoudaoNotePull(object):
             or youdao_file_suffix == ""
         ):
             response = self.youdaonote_api.get_file_by_id(file_id)
-            # 2、如果文件以 `<?xml` 开头
+            # 2、如果文件以 `<?xml` 开头，但存在一些笔记以 `<div` 开头的
             if response.content[:5] == b"<?xml":
                 file_type = FileType.XML
             # 3、如果文件以 `{` 开头
             elif response.content.startswith(b'{"'):
                 file_type = FileType.JSON
+            elif response.content[:4] == b"<div":
+                file_type = FileType.HTML
+
         return file_type
 
     def _get_file_action(self, local_file_path, modify_time) -> Enum:
@@ -234,11 +241,9 @@ class YoudaoNotePull(object):
             else:
                 modify_time = file_entry["modifyTimeForSort"]
                 create_time = file_entry["createTimeForSort"]
-                self._add_or_update_file(id, name, local_dir, modify_time, create_time)
+                self._add_or_update_file(id, name, local_dir, modify_time, create_time, entry)
 
-    def _add_or_update_file(
-        self, file_id, file_name, local_dir, modify_time, create_time
-    ):
+    def _add_or_update_file(self, file_id, file_name, local_dir, modify_time, create_time, entry):
         """
         新增或更新文件
         :param file_id:
@@ -250,47 +255,36 @@ class YoudaoNotePull(object):
         """
         file_name = self._optimize_file_name(file_name)
         youdao_file_suffix = os.path.splitext(file_name)[1]  # 笔记后缀
-        original_file_path = os.path.join(local_dir, file_name).replace(
-            "\\", "/"
-        )  # 原后缀路径
+        original_file_path = os.path.join(local_dir, file_name).replace("\\", "/")  # 原后缀路径
 
         # 所有类型文件均下载，不做处理
         file_type = self._judge_type(file_id, youdao_file_suffix)
 
         # 「文档」类型本地文件均已 .md 结尾
         local_file_path = (
-            os.path.join(
-                local_dir, "".join([os.path.splitext(file_name)[0], MARKDOWN_SUFFIX])
-            ).replace("\\", "/")
+            os.path.join(local_dir, "".join([os.path.splitext(file_name)[0], MARKDOWN_SUFFIX])).replace("\\", "/")
             if file_type != FileType.OTHER
             else original_file_path
         )
 
         # 如果有有道云笔记是「文档」类型，则提示类型
-        tip = (
-            "，云笔记原格式为 {}".format(file_type.name) if file_type != FileType.OTHER else ""
-        )
+        tip = "，云笔记原格式为 {}".format(file_type.name) if file_type != FileType.OTHER else ""
 
         file_action = self._get_file_action(local_file_path, modify_time)
         if file_action == FileActionEnum.CONTINUE:
+            self._additional_file_action(local_file_path, entry)
             return
+
         if file_action == FileActionEnum.UPDATE:
             # 考虑到使用 f.write() 直接覆盖原文件，在 Windows 下报错（WinError 183），先将其删除
             os.remove(local_file_path)
+
         try:
-            self._pull_file(
-                file_id,
-                original_file_path,
-                local_file_path,
-                file_type,
-                youdao_file_suffix,
-            )
+            self._pull_file(file_id, original_file_path, local_file_path, file_type, youdao_file_suffix, entry)
             if file_action == FileActionEnum.CONTINUE:
-                logging.debug(
-                    "{}「{}」{}".format(file_action.value, local_file_path, tip)
-                )
+                logging.info(f"{file_action.value}「{local_file_path}」{tip}")
             else:
-                logging.info("{}「{}」{}".format(file_action.value, local_file_path, tip))
+                logging.info(f"{file_action.value}「{local_file_path}」{tip}")
 
             # 本地文件时间设置为有道云笔记的时间
             if platform.system() == "Windows":
@@ -299,15 +293,9 @@ class YoudaoNotePull(object):
                 os.utime(local_file_path, (create_time, modify_time))
 
         except Exception as error:
-            logging.info(
-                "{}「{}」可能失败！请检查文件！错误提示：{}".format(
-                    file_action.value, original_file_path, format(error)
-                )
-            )
+            logging.error(f"{file_action.value}「{original_file_path}」可能失败！请检查文件！错误提示：{format(error)}")
 
-    def _pull_file(
-        self, file_id, file_path, local_file_path, file_type, youdao_file_suffix
-    ):
+    def _pull_file(self, file_id, file_path, local_file_path, file_type, youdao_file_suffix, entry):
         """
         下载文件
         :param file_id:
@@ -333,6 +321,12 @@ class YoudaoNotePull(object):
                 logging.info("note 笔记转换 MarkDown 失败，将跳过", repr(e))
         elif file_type == FileType.JSON:
             YoudaoNoteConvert.covert_json_to_markdown(file_path)
+        elif file_type == FileType.HTML:
+            try:
+                logging.info("此 note 笔记应该为 17 年以前新建，格式为 html，将转换为 Markdown ...")
+                YoudaoNoteConvert.covert_html_to_markdown(file_path)
+            except Exception as e:
+                logging.info("note 笔记转换 MarkDown 失败，将跳过", repr(e))
 
         # 3、迁移文本文件里面的有道云笔记图片（链接）
         if file_type != FileType.OTHER or youdao_file_suffix == MARKDOWN_SUFFIX:
@@ -340,6 +334,73 @@ class YoudaoNotePull(object):
                 self.youdaonote_api, self.smms_secret_token, self.is_relative_path
             )
             imagePull.migration_ydnote_url(local_file_path)
+
+        # 4、增加markdown frontmatter信息
+        self._patch_markdown_front_matter(local_file_path, entry)
+
+    def _additional_file_action(self, local_file_path, entry):
+        """
+        对本地文件额外操作, 支持多次运行重试.
+        Args:
+            local_file_path (_type_): _description_
+            entry (_type_): _description_
+        """
+        if not os.path.exists(local_file_path):
+            return
+
+        if not local_file_path.endswith(".md"):
+            logging.info(f"非markdown文件, 不需要处理markdown链接: {local_file_path}")
+            return
+
+        self._patch_markdown_front_matter(local_file_path, entry)  # 添加 markdown frontmatter 参数
+
+    def _patch_markdown_front_matter(self, local_file_path, file_params):
+        """
+        将有道云笔记的参数做为markdown的frontmatter记录, 主要用于记录创建时间和修改时间.
+        Args:
+            local_file_path (_type_): _description_
+            file_params (_type_): _description_
+        """
+
+        if not local_file_path.endswith(".md"):
+            logging.info(f"非markdown文件, 不需要处理markdown frontmatter: {local_file_path}")
+            return
+
+        file_entry = file_params["fileEntry"]
+        with open(local_file_path, "r") as f:
+            try:
+                fm = frontmatter.load(f)
+            except yaml.scanner.ScannerError as ex:
+                logging.info(f"识别 markdown frontmatter错误, 忽略. file {f} except: {ex}")
+                return
+            remote_modified_time = file_entry["modifyTimeForSort"]
+            stored_update_time = fm.metadata.get("noteMeta", {}).get("modifyTimeForSort", -1)
+            if stored_update_time >= remote_modified_time:
+                return
+
+            source = file_params["fileMeta"]["sourceURL"]
+            fname = file_entry["name"].replace(".note", ".md")
+            ctime = datetime.fromtimestamp(file_entry["createTimeForSort"]).strftime('%Y-%m-%d %H:%M:%S')
+            utime = datetime.fromtimestamp(file_entry["modifyTimeForSort"]).strftime('%Y-%m-%d %H:%M:%S')
+            # 这几个给 Joplin 使用
+            fm.metadata["title"] = fname
+            fm.metadata["created"] = ctime
+            fm.metadata["updated"] = utime
+            fm.metadata["source"] = source if source else ""
+
+            # 这几个保留原始记录
+            fm.metadata["noteMeta"] = {
+                "name": fname,
+                "id": file_entry["id"],
+                "parentId": file_entry["parentId"],
+                "checksum": file_entry["checksum"],
+                "version": file_entry["version"],
+                "fileSize": file_entry["fileSize"],
+                "createTimeForSort": file_entry["createTimeForSort"],
+                "modifyTimeForSort": file_entry["modifyTimeForSort"]
+            }
+
+        frontmatter.dump(fm, local_file_path, sort_keys=False)
 
 
 if __name__ == "__main__":
