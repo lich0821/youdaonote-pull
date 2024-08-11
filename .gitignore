@@ -1,12 +1,13 @@
-.idea/
+.*
+!.gitignore
+!.github
+!.pre-commit-config.yaml
+
 *.iml
 cookies.json
-.python-version
-.history
 __pycache__
 test-pull
 logs
-.vscode
 build
 dist
 *.spec
