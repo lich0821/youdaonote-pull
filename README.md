@@ -1,4 +1,4 @@
-最近在玩 [X(Twitter)](https://twitter.com/deppwang1)，欢迎关注！
+🆕 增加了 Markdown 元信息，方便导入 Joplin。
 
 # youdaonote-pull
 
@@ -54,6 +54,7 @@ python3 -m venv venv        # 使用虚拟环境
 . venv/bin/activate         # 激活虚拟环境
 sudo pip3 install -r requirements.txt
 ```
+
 ```shell
 # Windows
 python -m venv venv         # 使用虚拟环境
@@ -62,6 +63,7 @@ pip install -r requirements.txt
 
 # 有问题可参考 https://www.liaoxuefeng.com/wiki/1016959663602400/1017493741106496
 ```
+
 #### 3、设置登录 `Cookies` 文件 `cookies.json`
 
 ```json
@@ -146,7 +148,7 @@ pip install -r requirements.txt
 * `local_dir`：选填，本地存放导出文件的文件夹（绝对路径），不填则默认为当前文件夹
 * `ydnote_dir`：选填，有道云笔记指定导出文件夹名，不填则导出所有文件
 * `smms_secret_token`：选填， [SM.MS](https://sm.ms) 的 `Secret Token`（注册后 -> Dashboard -> API Token），用于上传笔记中有道云图床图片到 SM.MS 图床，不填则只下载到本地（`youdaonote-images` 文件夹），`Markdown` 中使用本地链接
-* `is_relative_path`：选填，在 MD 文件中图片 / 附件是否采用相对路径展示，不填或 false 为绝对路径，true 为相对路径    
+* `is_relative_path`：选填，在 MD 文件中图片 / 附件是否采用相对路径展示，不填或 false 为绝对路径，true 为相对路径
 
 示例：
 
@@ -211,7 +213,7 @@ python pull.py   # Windows
 
 - [YoudaoNoteExport](https://github.com/wesley2012/YoudaoNoteExport)
 
-## 出发点 
+## 出发点
 
 原来一直是有道云笔记的忠实用户，后面接触到了「所见即所得」的 [Typora](https://typora.io/)，有点用不惯有道云笔记了，想着有什么法子能电脑本地文件和有道云笔记同步，这样电脑使用 Typora，手机使用有道云笔记。发现有道云笔记有 [Open API](http://note.youdao.com/open/developguide.html) ，打算利用提供的 API，写两个脚本，一个 pull 所有文件到本地，一个 push 本地文件到云笔记。但 API 太难用了，N 多年没更新了，问客服也没更新的意思，开发到最后发现竟然没有 Markdown 文件的接口，醉了。遂放弃。
 
